@@ -1,0 +1,54 @@
+*&---------------------------------------------------------------------*
+*& Include          ZBP_UPLOAD_PROGRAM_CUST_FLOW
+*&---------------------------------------------------------------------*
+AT SELECTION-SCREEN OUTPUT.
+
+  LOOP AT SCREEN.
+    IF r_cus  = 'X'.
+      IF screen-group1 = 'M1'.
+        screen-active = 1.
+        screen-invisible = 0.
+      ENDIF.
+      IF screen-group1 = 'M2'.
+        screen-active = 0.
+        screen-invisible = 1.
+      ENDIF.
+    ELSEIF r_ven = 'X'.
+      IF screen-group1 = 'M1'.
+        screen-active = 0.
+        screen-invisible = 1.
+      ENDIF.
+      IF screen-group1 = 'M2'.
+        screen-active = 1.
+        screen-invisible = 0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
+  PERFORM f4_help USING p_file.
+
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_ship.
+  PERFORM f4_help USING p_ship.
+
+START-OF-SELECTION.
+  IF p_file IS INITIAL OR p_brow IS INITIAL OR p_erow IS INITIAL.
+    MESSAGE s000(zpp) WITH TEXT-001 DISPLAY LIKE 'E'.
+    LEAVE LIST-PROCESSING.
+  ENDIF.
+  IF r_cus = 'X'.
+    PERFORM read_file.
+  ELSEIF r_ven = 'X'.
+    PERFORM read_file_v.
+  ENDIF.
+
+END-OF-SELECTION.
+  IF r_cus = 'X'.
+    PERFORM post_bapi.
+    PERFORM display_alv.
+  ELSEIF r_ven = 'X'.
+    PERFORM post_bapi_v.
+    PERFORM display_alv.
+  ENDIF.
