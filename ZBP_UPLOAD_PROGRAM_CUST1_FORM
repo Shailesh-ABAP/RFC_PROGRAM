@@ -1,0 +1,1110 @@
+*&---------------------------------------------------------------------*
+*& Include          ZBP_UPLOAD_PROGRAM_CUST_FORM
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  F4_HELP
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM f4_help USING lv_file TYPE rlgrap-filename.
+  CALL FUNCTION 'F4_FILENAME'
+    EXPORTING
+      program_name  = syst-cprog
+      dynpro_number = syst-dynnr
+    IMPORTING
+      file_name     = lv_file.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  READ_FILE
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM read_file .
+
+  DATA lv_filename TYPE string.
+  lv_filename = p_file.
+
+*  CALL FUNCTION 'ZFM_EXCEL_UPLOAD'
+*    EXPORTING
+*      filename    = lv_filename
+*      i_begin_col = '1'
+*      i_begin_row = p_brow
+*      i_end_col   = '77'
+*      i_end_row   = p_erow
+*    TABLES
+*      data_tab    = gt_file_cust.
+
+  CALL FUNCTION 'TEXT_CONVERT_XLS_TO_SAP'
+    EXPORTING
+*     I_FIELD_SEPERATOR    =
+*     I_LINE_HEADER        =
+      i_tab_raw_data       = it_raw
+      i_filename           = p_file
+*     I_STEP               = 1
+    TABLES
+      i_tab_converted_data = gt_cust
+    EXCEPTIONS
+      conversion_failed    = 1
+      OTHERS               = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+  DATA : lv_count TYPE i.
+  lv_count = 0.
+  LOOP AT gt_cust INTO DATA(gs_cust).
+    lv_count = lv_count + 1.
+    IF lv_count GE p_brow.
+      append gs_cust to gt_file_cust.
+    ENDIF.
+    IF lv_count EQ p_erow.
+      exit.
+    ENDIF.
+  ENDLOOP.
+
+
+*  lv_filename = p_ship.
+*  CALL FUNCTION 'ZFM_EXCEL_UPLOAD'
+*    EXPORTING
+*      filename    = lv_filename
+*      i_begin_col = '1'
+*      i_begin_row = p_brow_s
+*      i_end_col   = '77'
+*      i_end_row   = p_erow_s
+*    TABLES
+*      data_tab    = gt_file_ship.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  POST_BAPI
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM post_bapi .
+
+  PERFORM populate_cust.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DISPLAY_ALV
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM display_alv .
+  DATA: lo_functions TYPE REF TO cl_salv_functions_list,
+        lo_cols      TYPE REF TO cl_salv_columns,
+        lo_display   TYPE REF TO cl_salv_display_settings,
+        lo_layout    TYPE REF TO cl_salv_layout,
+        lf_variant   TYPE slis_vari,
+        ls_key       TYPE salv_s_layout_key.
+
+  DELETE gt_ret WHERE type = 'I'.
+
+  TRY.
+      cl_salv_table=>factory(
+        IMPORTING
+          r_salv_table = go_alv
+        CHANGING
+          t_table      = gt_ret ).
+    CATCH cx_salv_msg INTO DATA(lx_msg).
+  ENDTRY.
+
+  lo_functions = go_alv->get_functions( ).
+  lo_functions->set_all( abap_true ).
+
+*...Get all the Columns
+  lo_cols = go_alv->get_columns( ).
+  DATA(t_col_ref) = lo_cols->get( ).
+  LOOP AT t_col_ref REFERENCE INTO DATA(ref_col_ref).
+    ref_col_ref->r_column->set_sign( 'X' ).
+  ENDLOOP.
+
+*   Set the Column optimization
+  lo_cols->set_optimize( 'X' ).
+
+*   Get display object
+  lo_display = go_alv->get_display_settings( ).
+
+*   Set ZEBRA pattern
+  lo_display->set_striped_pattern( 'X' ).
+
+*   Title to ALV
+  lo_display->set_list_header( 'BP Upload Log' ).
+
+*   Get layout object
+  lo_layout = go_alv->get_layout( ).
+
+*   Set Layout save restriction
+*   1. Set Layout Key .. Unique key identifies the Differenet ALVs
+  ls_key-report = sy-repid.
+  lo_layout->set_key( ls_key ).
+*   2. Remove Save layout the restriction.
+  lo_layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+
+*   Set initial Layout
+  lf_variant = 'DEFAULT'.
+  lo_layout->set_initial_layout( lf_variant ).
+
+*   Displaying the ALV
+*   Here we will call the DISPLAY method to get the output on the screen
+  go_alv->display( ).
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  POPULATE_CUST
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM populate_cust .
+  DATA : lt_bp_gen           TYPE TABLE OF cvis_bp_general,
+         ls_bp_gen           TYPE cvis_bp_general,
+         lt_role             TYPE TABLE OF cvis_bp_role,
+         ls_role             TYPE  cvis_bp_role,
+         lt_add              TYPE TABLE OF cvis_bp_address,
+         ls_add              TYPE  cvis_bp_address,
+         lt_tax              TYPE TABLE OF cvis_bp_tax_number,
+         ls_tax              TYPE  cvis_bp_tax_number,
+         lt_bp_usage         TYPE TABLE OF cvis_bp_address_usage,
+         ls_bp_usage         TYPE  cvis_bp_address_usage,
+         lt_bp_telno         TYPE TABLE OF cvis_bp_address_teleno,
+         ls_bp_telno         TYPE cvis_bp_address_teleno,
+         lt_bp_fax           TYPE TABLE OF cvis_bp_address_faxno,
+         ls_bp_fax           TYPE cvis_bp_address_faxno,
+         lt_bp_email         TYPE TABLE OF cvis_bp_address_email,
+         ls_bp_email         TYPE cvis_bp_address_email,
+         lt_cust_gen         TYPE TABLE OF cvis_customer_general,
+         ls_cust_gen         TYPE cvis_customer_general,
+         lt_cust_comp        TYPE TABLE OF cvis_customer_company,
+         ls_cust_comp        TYPE cvis_customer_company,
+         lt_cust_sales       TYPE TABLE OF cvis_customer_sales,
+         ls_cust_sales       TYPE cvis_customer_sales,
+         lt_cust_func        TYPE TABLE OF cvis_customer_sales_func,
+         ls_cust_func        TYPE cvis_customer_sales_func,
+         lt_bank_details     TYPE TABLE OF cvis_bp_bank_details,
+         ls_bank_details     TYPE  cvis_bp_bank_details,
+         lt_return           TYPE TABLE OF cvis_bp_return,
+         lt_bp_ident_numbers TYPE TABLE OF cvis_bp_ident_numbers,
+         ls_bp_ident_numbers TYPE  cvis_bp_ident_numbers,
+         lt_tax_ind          TYPE STANDARD TABLE OF cvis_customer_tax_indicator,
+         ls_tax_ind          TYPE cvis_customer_tax_indicator,
+         lv_pan              TYPE j_1ipanno,
+         ls_cms              TYPE ukmbp_cms,
+         lt_cms              TYPE TABLE OF ukmbp_cms,
+         ls_sgm              TYPE ukmbp_cms_sgm,
+         lt_sgm              TYPE TABLE OF ukmbp_cms_sgm.
+  LOOP AT gt_file_cust REFERENCE INTO DATA(ref_file).
+    CLEAR lv_pan.
+    lv_pan = ref_file->pannum.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = ref_file->cust_code
+      IMPORTING
+        output = ref_file->cust_code.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = ref_file->recon_acct
+      IMPORTING
+        output = ref_file->recon_acct.
+
+
+    ls_bp_gen-run_id = ref_file->cust_code.
+    ls_bp_gen-bpartner = ref_file->cust_code.
+    IF p_create = 'X' OR p_creat = 'X'.
+      ls_bp_gen-object_task = 'I'.
+    ELSE.
+      ls_bp_gen-object_task = 'U'.
+      ls_bp_gen-bpartner = ref_file->cust_code.
+    ENDIF.
+    ls_bp_gen-category = 2.
+    ls_bp_gen-grouping = ref_file->acct_grp.
+    ls_bp_gen-searchterm1 = ref_file->sort1.
+    ls_bp_gen-searchterm2 = ref_file->sort2.
+    ls_bp_gen-partnerlanguageiso = 'E'.
+    ls_bp_gen-partnerexternal = ref_file->bpext.
+    ls_bp_gen-name1 = ref_file->name1.
+    ls_bp_gen-name2 = ref_file->name2.
+    APPEND ls_bp_gen TO lt_bp_gen.
+    CLEAR ls_bp_gen.
+
+    IF ref_file->gstin IS NOT INITIAL.
+      ls_tax-run_id = ref_file->cust_code.
+      ls_tax-taxtype = 'IN3'.
+      ls_tax-taxnumber = ref_file->gstin.
+      APPEND ls_tax TO lt_tax.
+      CLEAR ls_tax.
+    ENDIF.
+
+    IF p_create EQ 'X' OR p_comp EQ 'X' OR p_creat = 'X'.
+      ls_role-run_id = ref_file->cust_code.
+      ls_role-data_key = 'FLCU00'.
+      ls_role-rolecategory = 2.
+
+      APPEND ls_role  TO lt_role.
+      CLEAR ls_role.
+    ENDIF.  "27.11.2017
+    IF p_create EQ 'X' OR p_change EQ 'X'.  "27.11.2017
+      ls_role-run_id = ref_file->cust_code.
+      ls_role-data_key = 'FLCU01'.
+      ls_role-rolecategory = 2.
+
+      APPEND ls_role  TO lt_role.
+      CLEAR ls_role.
+    ENDIF.  "27.11.2017
+
+    IF p_create EQ 'X' OR p_change = 'X' OR p_creat = 'X'.
+      "Populate BP Address Data
+      ls_add-run_id = ref_file->cust_code.
+      ls_add-postl_cod1 = ref_file->post_code.
+      ls_add-street = ref_file->street1.
+      ls_add-str_suppl3 = ref_file->street2.
+      ls_add-location = ref_file->street3.
+      ls_add-city    = ref_file->city.
+      ls_add-country = ref_file->country.
+      ls_add-region = ref_file->region.
+      ls_add-langu = 'E'.
+      APPEND ls_add TO lt_add.
+      CLEAR ls_add.
+
+      ls_bp_usage-run_id = ref_file->cust_code.
+      ls_bp_usage-addresstype = 'XXDEFAULT'.
+      ls_bp_usage-standard = 'X'.
+      APPEND ls_bp_usage TO lt_bp_usage.
+      CLEAR ls_bp_usage.
+
+      IF ref_file->tel_no IS NOT INITIAL.
+        ls_bp_telno-run_id = ref_file->cust_code.
+        ls_bp_telno-telephone = ref_file->tel_no.
+        ls_bp_telno-r_3_user = 1.
+        APPEND ls_bp_telno TO lt_bp_telno.
+        CLEAR ls_bp_telno.
+      ENDIF.
+
+      IF ref_file->mob_no IS NOT INITIAL.
+        ls_bp_telno-run_id = ref_file->cust_code.
+        ls_bp_telno-telephone = ref_file->mob_no.
+        ls_bp_telno-r_3_user = 3.
+        APPEND ls_bp_telno TO lt_bp_telno.
+        CLEAR ls_bp_telno.
+      ENDIF.
+
+      "Populate BP Fax Numbers (Business Address Services)
+      IF ref_file->fax_no IS NOT INITIAL.
+        ls_bp_fax-run_id = ref_file->cust_code.
+        ls_bp_fax-fax = ref_file->fax_no.
+        APPEND ls_bp_fax TO lt_bp_fax.
+        CLEAR ls_bp_fax.
+      ENDIF.
+
+      "Populate BP E-Mail Addresses (Business Address Services)
+      IF ref_file->mail IS NOT INITIAL.
+        ls_bp_email-run_id  = ref_file->cust_code.
+        ls_bp_email-std_no = 'X'.
+        ls_bp_email-e_mail = ref_file->mail.
+        APPEND ls_bp_email TO lt_bp_email.
+        CLEAR ls_bp_email.
+      ENDIF.
+    ENDIF."27.11.2017
+
+    "POpulate Customer General Data
+    ls_cust_gen-run_id = ref_file->cust_code.
+    ls_cust_gen-kunnr = ref_file->cust_code.
+    IF p_create EQ 'X' OR p_creat = 'X'.
+      ls_cust_gen-object_task = 'I'.
+    ELSE. "27.11.2017
+      ls_cust_gen-object_task = 'U'. "27.11.2017
+    ENDIF.    "27.11.2017
+    IF ref_file->acct_grp = 'ZDOM'.
+      ls_cust_gen-ktokd = 'Z001'.
+    ELSEIF ref_file->acct_grp = 'ZEXP'.
+      ls_cust_gen-ktokd = 'Z002'.
+    ELSEIF ref_file->acct_grp = 'ZREL'.
+      ls_cust_gen-ktokd = 'Z003'.
+    ELSEIF ref_file->acct_grp = 'ZPLT'.
+      ls_cust_gen-ktokd = 'Z004'.
+    ELSE.
+      ls_cust_gen-ktokd = ref_file->acct_grp.
+    ENDIF.
+    APPEND ls_cust_gen TO lt_cust_gen.
+    CLEAR ls_cust_gen.
+
+    IF p_create EQ 'X' OR p_comp EQ 'X' OR p_creat = 'X'.
+      ls_cust_comp-run_id = ref_file->cust_code.
+      ls_cust_comp-bukrs = ref_file->comp_code.
+      ls_cust_comp-akont = ref_file->recon_acct.
+      ls_cust_comp-zterm = ref_file->zterm_inv.
+      ls_cust_comp-altkn = ref_file->prev_acct.
+      ls_cust_comp-xzver = 'X'.
+      APPEND ls_cust_comp TO lt_cust_comp.
+      CLEAR ls_cust_comp.
+    ENDIF."27.11.2017
+
+    IF p_create EQ 'X' OR p_change EQ 'X' OR p_sorg IS NOT INITIAL.
+      ls_cust_sales-run_id = ref_file->cust_code.
+      ls_cust_sales-vkorg = ref_file->sales_org.
+      ls_cust_sales-vtweg = ref_file->dist_ch.
+      ls_cust_sales-spart = ref_file->div.
+      ls_cust_sales-kalks = ref_file->price_proc .
+      ls_cust_sales-versg = '+' .
+      ls_cust_sales-kdgrp = ref_file->kdgrp.
+      ls_cust_sales-inco1 = ref_file->inco1.
+      ls_cust_sales-vsbed = '01'.
+      ls_cust_sales-waers = ref_file->curr.
+      ls_cust_sales-konda = ref_file->konda.
+      ls_cust_sales-ktgrd = ref_file->acct_ass.
+      ls_cust_sales-awahr = 100.
+      ls_cust_sales-zterm = ref_file->zterm_inv.
+      ls_cust_sales-kdgrp = ref_file->kdgrp.
+      ls_cust_sales-kzazu = ref_file->kzazu.
+      ls_cust_sales-vkgrp = ref_file->vkgrp.
+      ls_cust_sales-vkbur = ref_file->vkbur.
+      APPEND ls_cust_sales TO lt_cust_sales.
+      CLEAR ls_cust_sales.
+    ENDIF. "27.11.2017
+
+    IF ref_file->bank_key IS NOT INITIAL
+    AND ref_file->bank_cntry_key IS NOT INITIAL.
+      ls_bank_details-run_id =  ref_file->cust_code.
+      ls_bank_details-data_key = 0001.
+      ls_bank_details-bank_key = ref_file->bank_key.
+      ls_bank_details-bank_ctry = ref_file->bank_cntry_key.
+      ls_bank_details-bank_acct = ref_file->bank_acc_no.
+      APPEND ls_bank_details TO lt_bank_details.
+      CLEAR ls_bank_details.
+    ENDIF.
+    IF p_creat NE 'X'.
+      IF ref_file->tatyp1 IS NOT INITIAL.
+        ls_tax_ind-run_id = ref_file->cust_code.
+        ls_tax_ind-aland = ref_file->country.
+        ls_tax_ind-tatyp = ref_file->tatyp1.
+        ls_tax_ind-taxkd = ref_file->taxkd1.
+        APPEND ls_tax_ind TO lt_tax_ind.
+      ENDIF.
+
+      IF ref_file->tatyp2 IS NOT INITIAL.
+        ls_tax_ind-run_id = ref_file->cust_code.
+        ls_tax_ind-aland = ref_file->country.
+        ls_tax_ind-tatyp = ref_file->tatyp2.
+        ls_tax_ind-taxkd = ref_file->taxkd2.
+        APPEND ls_tax_ind TO lt_tax_ind.
+      ENDIF.
+
+      IF ref_file->tatyp3 IS NOT INITIAL.
+        ls_tax_ind-run_id = ref_file->cust_code.
+        ls_tax_ind-aland = ref_file->country.
+        ls_tax_ind-tatyp = ref_file->tatyp3.
+        ls_tax_ind-taxkd = ref_file->taxkd3.
+        APPEND ls_tax_ind TO lt_tax_ind.
+      ENDIF.
+
+      IF ref_file->tatyp4 IS NOT INITIAL.
+        ls_tax_ind-run_id = ref_file->cust_code.
+        ls_tax_ind-aland = ref_file->country.
+        ls_tax_ind-tatyp = ref_file->tatyp4.
+        ls_tax_ind-taxkd = ref_file->taxkd4.
+        APPEND ls_tax_ind TO lt_tax_ind.
+      ENDIF.
+
+      IF ref_file->tatyp5 IS NOT INITIAL.
+        ls_tax_ind-run_id = ref_file->cust_code.
+        ls_tax_ind-aland = ref_file->country.
+        ls_tax_ind-tatyp = ref_file->tatyp5.
+        ls_tax_ind-taxkd = ref_file->taxkd5.
+        APPEND ls_tax_ind TO lt_tax_ind.
+      ENDIF.
+
+      IF ref_file->tatyp6 IS NOT INITIAL.
+        ls_tax_ind-run_id = ref_file->cust_code.
+        ls_tax_ind-aland = ref_file->country.
+        ls_tax_ind-tatyp = ref_file->tatyp6.
+        ls_tax_ind-taxkd = ref_file->taxkd6.
+        APPEND ls_tax_ind TO lt_tax_ind.
+      ENDIF.
+    ENDIF.
+
+    IF p_test = 'X'.
+      CLEAR gv_commit.
+    ELSE.
+      gv_commit = 'X'.
+    ENDIF.
+    CALL FUNCTION 'RFC_CVI_EI_INBOUND_MAIN'
+      EXPORTING
+        iv_docommit             = gv_commit
+*       IV_CREATE_APPLOG        =
+*       IV_SUPPRESS_TAXJUR_CHECK       =
+      TABLES
+        it_bp_general           = lt_bp_gen
+        it_bp_role              = lt_role
+*       IT_BP_INDUSTRY          =
+        it_bp_ident_numbers     = lt_bp_ident_numbers
+        it_bp_bank_details      = lt_bank_details
+        it_bp_tax_number        = lt_tax
+*       IT_BP_TAX_NUMBER_COMMON =
+        it_bp_address           = lt_add
+        it_bp_address_usage     = lt_bp_usage
+        it_bp_address_teleno    = lt_bp_telno
+        it_bp_address_faxno     = lt_bp_fax
+        it_bp_address_email     = lt_bp_email
+        it_cust_general         = lt_cust_gen
+        it_cust_company         = lt_cust_comp
+        it_cust_sales           = lt_cust_sales
+        it_cust_sales_functions = lt_cust_func
+        it_cust_tax_indicator   = lt_tax_ind
+        ct_return               = lt_return.
+    LOOP AT lt_return INTO DATA(ls_ret).
+
+      IF ls_ret-type = 'S'.
+        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'.
+        WAIT UP TO 1 SECONDS.
+        UPDATE kna1 SET j_1ipanno = lv_pan WHERE kunnr EQ ls_ret-object_key.
+        IF sy-subrc EQ 0.
+          COMMIT WORK. WAIT UP TO 1 SECONDS.
+        ELSE.
+          ROLLBACK WORK.
+        ENDIF.
+      ENDIF.
+
+      READ TABLE lt_bp_gen INTO ls_bp_gen WITH KEY run_id = ls_ret-run_id.
+      IF sy-subrc = 0.
+        ls_ret-message_v1  = ls_bp_gen-name1.
+      ENDIF.
+      APPEND ls_ret TO gt_ret.
+      CLEAR ls_ret.
+    ENDLOOP.
+    REFRESH: lt_role,lt_bp_gen,lt_bp_telno , lt_bp_usage, lt_add,lt_sgm,lt_cms,lt_cust_func, lt_tax,
+             lt_cust_comp, lt_bp_email, lt_bp_fax, lt_cust_gen, lt_return,lt_cust_sales, lt_tax_ind, lt_bank_details.
+  ENDLOOP.
+  IF gv_commit = 'X'.
+    IF lt_cms IS NOT INITIAL.
+      MODIFY ukmbp_cms FROM TABLE lt_cms.
+      COMMIT WORK AND WAIT .
+    ENDIF.
+    IF lt_sgm IS NOT INITIAL.
+      MODIFY ukmbp_cms_sgm FROM TABLE lt_sgm.
+      COMMIT WORK AND WAIT .
+    ENDIF.
+  ENDIF.
+
+  REFRESH: lt_role, lt_bp_gen, lt_bp_telno , lt_bp_usage, lt_add,lt_sgm,lt_cms,
+           lt_cust_comp, lt_bp_email, lt_bp_fax, lt_cust_gen, lt_return.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  POPULATE_PF
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_LT_CUST_FUNC  text
+*----------------------------------------------------------------------*
+FORM populate_pf  TABLES plt_cust_func
+                  USING ls_cust_func TYPE cvis_customer_sales_func
+                        lv_parvw TYPE parvw
+                        lv_part TYPE gpanr.
+
+*  DATA : ls_func  TYPE cvis_customer_sales_func.
+  IF lv_part IS NOT INITIAL.
+    ls_cust_func-parvw = lv_parvw.
+    IF lv_part <> '##'.
+      CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+        EXPORTING
+          input  = lv_part
+        IMPORTING
+          output = lv_part.
+
+    ENDIF.
+    IF p_create NE 'X'.
+      ls_cust_func-partner = ' '.
+    ELSE.
+      IF p_creat NE 'X'.
+        ls_cust_func-partner = ' '.
+      ELSE.
+        ls_cust_func-partner = lv_part.
+      ENDIF.
+    ENDIF.
+    APPEND ls_cust_func TO plt_cust_func.
+    CLEAR : ls_cust_func-parvw, ls_cust_func-partner.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*& Form post_bapi_v
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM post_bapi_v .
+  TYPES: BEGIN OF lts_pan,
+           runid TYPE char20,
+           pan   TYPE j_1ipanno,
+         END OF lts_pan.
+
+  DATA : lt_pan              TYPE TABLE OF lts_pan,
+         lt_bp_general       TYPE TABLE OF cvis_bp_general,
+         ls_bp_general       TYPE cvis_bp_general,
+         lt_bp_role          TYPE TABLE OF cvis_bp_role,
+         ls_bp_role          TYPE  cvis_bp_role,
+         lt_bp_ident_numbers TYPE TABLE OF cvis_bp_ident_numbers,
+         ls_bp_ident_numbers TYPE  cvis_bp_ident_numbers,
+
+         lt_bank_details     TYPE TABLE OF cvis_bp_bank_details,
+         ls_bank_details     TYPE  cvis_bp_bank_details,
+
+         lt_tax              TYPE TABLE OF cvis_bp_tax_number,
+         ls_tax              TYPE  cvis_bp_tax_number,
+         lt_address          TYPE TABLE OF cvis_bp_address,
+         ls_address          TYPE  cvis_bp_address,
+         lt_add_usage        TYPE TABLE OF cvis_bp_address_usage,
+         ls_add_usage        TYPE  cvis_bp_address_usage,
+         lt_add_telno        TYPE TABLE OF cvis_bp_address_teleno,
+         ls_add_telno        TYPE cvis_bp_address_teleno,
+         lt_fax_no           TYPE TABLE OF cvis_bp_address_faxno,
+         ls_fax_no           TYPE cvis_bp_address_faxno,
+         lt_email            TYPE TABLE OF cvis_bp_address_email,
+         ls_email            TYPE cvis_bp_address_email,
+         lt_bp_uri           TYPE TABLE OF cvis_bp_address_url,
+         ls_bp_uri           TYPE cvis_bp_address_url,
+         lt_gen              TYPE TABLE OF cvis_supplier_general,
+         ls_gen              TYPE  cvis_supplier_general,
+         lt_comp             TYPE TABLE OF cvis_supplier_company,
+         ls_comp             TYPE  cvis_supplier_company,
+         lt_with_tax         TYPE TABLE OF cvis_supplier_company_wtax,
+         ls_with_tax         TYPE cvis_supplier_company_wtax,
+         lt_purchase         TYPE TABLE OF cvis_supplier_purchasing,
+         ls_purchase         TYPE  cvis_supplier_purchasing,
+         lt_purch_func       TYPE TABLE OF cvis_supplier_purch_func,
+         ls_purch_func       TYPE cvis_supplier_purch_func,
+         lt_ret              TYPE TABLE OF cvis_bp_return,
+         lt_but000           TYPE TABLE OF but000,
+         lv_runid            TYPE char20,
+         lt_bugrp            TYPE TABLE OF tpakl,
+         lv_pan              TYPE j_1ipanno,
+         lv_time             TYPE char3 VALUE '0.1'.
+
+  REFRESH gt_ret.
+  SORT gt_vend BY vend_acct ASCENDING.
+  DATA(gt_vend_temp) = gt_vend[].
+  SORT gt_vend_temp[] BY vend_grp.
+  DELETE ADJACENT DUPLICATES FROM gt_vend_temp COMPARING vend_grp.
+
+  SELECT * FROM tpakl INTO TABLE lt_bugrp FOR ALL ENTRIES IN gt_vend_temp WHERE ktokk = gt_vend_temp-vend_grp.
+
+  LOOP AT gt_vend REFERENCE INTO DATA(ref_file).
+    CLEAR lv_pan.
+    lv_pan = ref_file->pannum.
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = ref_file->vend_acct
+      IMPORTING
+        output = ref_file->vend_acct.
+
+
+    CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
+      EXPORTING
+        input  = ref_file->recon_acct
+      IMPORTING
+        output = ref_file->recon_acct.
+
+    IF p_create = 'X'.
+      lv_runid = ref_file->vend_acct.
+    ELSE.
+      lv_runid = ref_file->vend_acct.
+    ENDIF.
+
+    "Populate BP General Data
+    IF p_create = 'X'.
+      ls_bp_general-run_id = lv_runid.
+      ls_bp_general-bpartner = lv_runid.
+      ls_bp_general-object_task = 'I'. "Insert
+    ELSE.
+      ls_bp_general-run_id = lv_runid.
+      ls_bp_general-bpartner = lv_runid.
+      ls_bp_general-object_task = 'U'. "update Vendor
+    ENDIF.
+    ls_bp_general-category = 2.
+    IF ref_file->bp_grp IS NOT INITIAL.
+      ls_bp_general-grouping = ref_file->bp_grp.
+    ENDIF.
+    ls_bp_general-searchterm1 = ref_file->sort1.
+    ls_bp_general-name1 = ref_file->name1.
+    ls_bp_general-name2 = ref_file->name2.
+    ls_bp_general-name3 = ref_file->name3.
+    ls_bp_general-name4 = ref_file->name4.
+    ls_bp_general-partnerexternal = ref_file->prev_master. " EXTERNAL BP
+
+    ls_bp_general-partnertype = ref_file->bpkind.
+    ls_bp_general-title_key = ref_file->title.
+    APPEND ls_bp_general TO lt_bp_general.
+    CLEAR ls_bp_general.
+
+    "Populate BP Role
+    IF p_create = 'X' OR p_change = 'X'.
+      IF ref_file->comp_code IS NOT INITIAL AND ref_file->pur_org IS NOT INITIAL.
+        ls_bp_role-run_id = lv_runid.
+        ls_bp_role-data_key = 'FLVN01'.
+        ls_bp_role-rolecategory = 2.
+
+        APPEND ls_bp_role TO lt_bp_role.
+        CLEAR ls_bp_role.
+
+        ls_bp_role-run_id = lv_runid.
+        ls_bp_role-data_key = 'FLVN00'.
+        ls_bp_role-rolecategory = 2.
+
+        APPEND ls_bp_role TO lt_bp_role.
+        CLEAR ls_bp_role.
+
+      ELSEIF ref_file->comp_code IS NOT INITIAL.
+        ls_bp_role-run_id = lv_runid.
+        ls_bp_role-data_key = 'FLVN00'.
+        ls_bp_role-rolecategory = 2.
+
+        APPEND ls_bp_role TO lt_bp_role.
+        CLEAR ls_bp_role.
+      ELSE.
+        ls_bp_role-run_id = lv_runid.
+        ls_bp_role-data_key = 'FLVN01'.
+        ls_bp_role-rolecategory = 2.
+
+        APPEND ls_bp_role TO lt_bp_role.
+        CLEAR ls_bp_role.
+      ENDIF.
+    ENDIF.
+
+    "Population tax data
+    IF p_create = 'X' OR p_change = 'X'.
+      IF ref_file->taxnumber IS NOT INITIAL.
+        ls_tax-run_id = lv_runid.
+        ls_tax-taxtype = 'IN3'.
+        ls_tax-taxnumber = ref_file->taxnumber.
+
+        APPEND ls_tax TO lt_tax.
+        CLEAR ls_tax.
+      ENDIF.
+    ENDIF.
+
+*--aadhar
+
+    IF ref_file->aadhar IS NOT INITIAL.
+      ls_bp_ident_numbers-run_id = lv_runid.
+      ls_bp_ident_numbers-identificationcategory = 'AADHAR'.
+      ls_bp_ident_numbers-identificationnumber = ref_file->aadhar.
+      APPEND ls_bp_ident_numbers TO lt_bp_ident_numbers.
+      CLEAR:ls_bp_ident_numbers.
+    ENDIF.
+
+*--Populate BP Bank Details
+    IF ref_file->bank_key IS NOT INITIAL
+    AND ref_file->bank_cntry_key IS NOT INITIAL.
+      ls_bank_details-run_id =  lv_runid.
+      ls_bank_details-data_key = 0001.
+      ls_bank_details-bank_key = ref_file->bank_key.
+      ls_bank_details-bank_ctry = ref_file->bank_cntry_key.
+      ls_bank_details-bank_acct = ref_file->bank_acc_no.
+      ls_bank_details-bankaccountname = ref_file->bank_acc_name.
+      ls_bank_details-accountholder = ref_file->bank_acc_holder_name.
+      APPEND ls_bank_details TO lt_bank_details.
+      CLEAR ls_bank_details.
+    ENDIF.
+    "Populate BP Address Data
+*    IF p_create = 'X'.
+    IF p_create = 'X' OR p_change = 'X'.
+      ls_address-run_id = lv_runid.
+      ls_address-city = ref_file->city1.
+      ls_address-postl_cod1 = ref_file->post_code .
+      ls_address-street = ref_file->street1. "Street1
+      ls_address-str_suppl1 = ref_file->street2. "Street2
+      ls_address-str_suppl2 = ref_file->street3. "Street3
+
+*      ls_address-house_no = ref_file->house_num.
+      ls_address-time_zone = ref_file->time_zone.
+***      LS_ADDRESS-LOCATION = REF_FILE->STREET5.
+      ls_address-country = ref_file->country.
+      ls_address-region  = ref_file->region.
+      ls_address-langu = 'E'.
+
+      ls_address-extaddressnumber = ref_file->contact_per.
+      APPEND ls_address TO lt_address.
+      CLEAR ls_address.
+
+      "Populate BP Time-Dependent Address
+      ls_add_usage-run_id = lv_runid.
+      ls_add_usage-addresstype = 'XXDEFAULT'.
+      ls_add_usage-standard = 'X'.
+      APPEND ls_add_usage TO lt_add_usage.
+      CLEAR ls_add_usage.
+
+      "Populate BP Telephone Numbers (Business Address Services)
+      IF ref_file->tel_no IS NOT INITIAL.
+        ls_add_telno-run_id  = lv_runid.
+        ls_add_telno-telephone   = ref_file->tel_no.
+        APPEND ls_add_telno TO lt_add_telno.
+        CLEAR ls_add_telno.
+      ENDIF.
+
+      IF ref_file->mob_no IS NOT INITIAL.
+        ls_add_telno-run_id  = lv_runid.
+        ls_add_telno-telephone   = ref_file->mob_no.
+        ls_add_telno-r_3_user   = '2'.
+        APPEND ls_add_telno TO lt_add_telno.
+        CLEAR ls_add_telno.
+      ENDIF.
+
+      "Populate BP Fax Numbers (Business Address Services)
+      IF ref_file->fax_no IS NOT INITIAL.
+        ls_fax_no-run_id = lv_runid.
+        ls_fax_no-fax = ref_file->fax_no.
+        APPEND ls_fax_no TO lt_fax_no.
+        CLEAR ls_fax_no.
+      ENDIF.
+
+      "Populate BP E-Mail Addresses (Business Address Services)
+      IF ref_file->mail IS NOT INITIAL.
+        ls_email-run_id  = lv_runid.
+        ls_email-std_no = 'X'.
+        ls_email-e_mail = ref_file->mail.
+        APPEND ls_email TO lt_email.
+        CLEAR ls_email.
+      ENDIF.
+    ENDIF.
+
+    "Populate Supplier GEneral Data
+    IF p_create = 'X' OR p_change = 'X'. """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+      ls_gen-run_id = lv_runid.
+      ls_gen-lifnr = lv_runid.
+      IF p_change = 'X'.
+        ls_gen-lifnr = ref_file->vend_acct.
+      ENDIF.
+      IF p_create = 'X'.
+        ls_gen-object_task = 'I'.
+      ELSE.
+        ls_gen-object_task = 'U'.
+      ENDIF.
+      ls_gen-ktokk = ref_file->vend_grp.
+      APPEND ls_gen TO lt_gen.
+      CLEAR ls_gen.
+    ENDIF.
+
+    "Populate Supplier Company data
+    IF ref_file->comp_code IS NOT INITIAL.
+      ls_comp-run_id = lv_runid.
+      ls_comp-bukrs = ref_file->comp_code.
+      ls_comp-zuawa = ref_file->sort_key.
+      ls_comp-akont = ref_file->recon_acct.
+      ls_comp-zterm = ref_file->terms_pay.
+      ls_comp-altkn = ref_file->prev_master.
+      ls_comp-reprf = ref_file->reprf.
+      ls_comp-tlfns = ref_file->empid.
+      ls_comp-busab = ref_file->busab.
+      APPEND ls_comp TO lt_comp.
+      CLEAR ls_comp.
+    ENDIF.
+
+    "Populate supplier company withholding tax
+    IF ref_file->with_tax_type1 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type1.
+      ls_with_tax-wt_subjct = ref_file->with_tax1.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code1.
+      ls_with_tax-qsrec = ref_file->qsrec1.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type2 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type2.
+      ls_with_tax-wt_subjct = ref_file->with_tax2.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code2.
+      ls_with_tax-qsrec = ref_file->qsrec2.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type3 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type3.
+      ls_with_tax-wt_subjct = ref_file->with_tax3.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code3.
+      ls_with_tax-qsrec = ref_file->qsrec3.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type4 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type4.
+      ls_with_tax-wt_subjct = ref_file->with_tax4.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code4.
+      ls_with_tax-qsrec = ref_file->qsrec4.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type5 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type5.
+      ls_with_tax-wt_subjct = ref_file->with_tax5.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code5.
+      ls_with_tax-qsrec = ref_file->qsrec5.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type6 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type6.
+      ls_with_tax-wt_subjct = ref_file->with_tax6.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code6.
+      ls_with_tax-qsrec = ref_file->qsrec6.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type7 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type7.
+      ls_with_tax-wt_subjct = ref_file->with_tax7.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code7.
+      ls_with_tax-qsrec = ref_file->qsrec7.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type8 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type8.
+      ls_with_tax-wt_subjct = ref_file->with_tax8.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code8.
+      ls_with_tax-qsrec = ref_file->qsrec8.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type9 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid. "ref_file->vend_acct.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type9.
+      ls_with_tax-wt_subjct = ref_file->with_tax9.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code9.
+      ls_with_tax-qsrec = ref_file->qsrec9.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    IF ref_file->with_tax_type10 IS NOT INITIAL.
+      ls_with_tax-run_id = lv_runid.
+      ls_with_tax-bukrs = ref_file->comp_code.
+      ls_with_tax-witht = ref_file->with_tax_type10.
+      ls_with_tax-wt_subjct = ref_file->with_tax10.
+      ls_with_tax-wt_withcd = ref_file->with_tax_code10.
+      ls_with_tax-qsrec = ref_file->qsrec10.
+      APPEND ls_with_tax TO lt_with_tax.
+      CLEAR ls_with_tax.
+    ENDIF.
+
+    "Populate Supplier Purchasing Data
+    IF ref_file->pur_org IS NOT INITIAL.
+      ls_purchase-run_id = lv_runid.
+      ls_purchase-ekorg = ref_file->pur_org.
+      ls_purchase-waers = ref_file->pur_curr.
+*      ls_purchase-zterm = ref_file->terms_pay.
+      ls_purchase-inco1 = ref_file->inco1.
+      ls_purchase-webre = ref_file->gr_ind.
+      ls_purchase-ekgrp = ref_file->pur_grp.
+      ls_purchase-lebre = ref_file->ser_ind.
+      ls_purchase-plifz = ref_file->plifz.
+      ls_purchase-kalsk = ref_file->kalsk.
+      ls_purchase-inco2_l = ref_file->inco2_l.
+      ls_purchase-inco3_l = ref_file->inco3_l.
+      APPEND ls_purchase TO lt_purchase.
+      CLEAR ls_purchase.
+    ENDIF.
+
+    "Populate Supplier Purchasing Data
+    IF ref_file->pur_org IS NOT INITIAL.
+      LOOP AT lt_bugrp REFERENCE INTO DATA(ref_prtnr).
+        IF ref_prtnr->ktokk <> ref_file->vend_grp.
+          EXIT.
+        ENDIF.
+        ls_purch_func-run_id = lv_runid.
+        ls_purch_func-partner = lv_runid.
+        ls_purch_func-ekorg = ref_file->pur_org.
+        CALL FUNCTION 'CONVERSION_EXIT_PARVW_INPUT'
+          EXPORTING
+            input  = ref_prtnr->parvw
+          IMPORTING
+            output = ref_prtnr->parvw.
+        ls_purch_func-parvw = ref_prtnr->parvw.
+        IF p_change = 'X'.
+          SELECT SINGLE lifnr,ekorg,parvw,parza FROM wyt3 INTO @DATA(ls_wyt3) WHERE lifnr EQ @ref_file->vend_acct AND ekorg EQ @ref_file->pur_org AND parvw EQ @ref_prtnr->parvw.
+          IF sy-subrc EQ 0.
+            ls_purch_func-parza = ls_wyt3-parza.
+            CLEAR ls_wyt3.
+          ENDIF.
+        ENDIF.
+        APPEND ls_purch_func TO lt_purch_func.
+        CLEAR ls_purch_func.
+
+      ENDLOOP.
+    ENDIF.
+
+    IF p_org IS NOT INITIAL.
+      IF ref_file->comp_code IS NOT INITIAL AND ref_file->pur_org IS NOT INITIAL.
+        ls_bp_role-run_id = lv_runid. "ref_file->vend_acct.
+        ls_bp_role-data_key = 'FLVN01'.
+        ls_bp_role-rolecategory = 2.
+        APPEND ls_bp_role TO lt_bp_role.
+        CLEAR ls_bp_role.
+      ENDIF.
+    ENDIF.
+
+    IF p_org IS NOT INITIAL.
+      REFRESH: lt_comp, lt_purch_func.
+    ENDIF.
+
+    IF p_test = 'X'.
+      CLEAR gv_commit.
+    ELSE.
+      gv_commit = 'X'.
+    ENDIF.
+    CALL FUNCTION 'RFC_CVI_EI_INBOUND_MAIN'
+      EXPORTING
+        iv_docommit            = gv_commit
+      TABLES
+        it_bp_general          = lt_bp_general
+        it_bp_role             = lt_bp_role
+        it_bp_ident_numbers    = lt_bp_ident_numbers
+        it_bp_bank_details     = lt_bank_details
+        it_bp_tax_number       = lt_tax
+        it_bp_address          = lt_address
+        it_bp_address_usage    = lt_add_usage
+        it_bp_address_teleno   = lt_add_telno
+        it_bp_address_faxno    = lt_fax_no
+        it_bp_address_email    = lt_email
+        it_sup_general         = lt_gen
+        it_sup_company         = lt_comp
+        it_sup_company_wtax    = lt_with_tax
+        it_sup_purchasing      = lt_purchase
+        it_sup_purch_functions = lt_purch_func
+        ct_return              = lt_ret.
+
+    LOOP AT lt_ret INTO DATA(ls_ret).
+
+      IF ls_ret-type = 'S'.
+        UPDATE lfa1 SET j_1ipanno = lv_pan WHERE lifnr EQ ls_ret-object_key.
+        IF sy-subrc EQ 0.
+          COMMIT WORK. WAIT UP TO lv_time SECONDS.
+        ELSE.
+          ROLLBACK WORK.
+        ENDIF.
+      ENDIF.
+
+      READ TABLE lt_bp_general INTO ls_bp_general WITH KEY run_id = ls_ret-run_id.
+      IF sy-subrc = 0.
+        ls_ret-message_v1  = ls_bp_general-name1.
+        APPEND ls_ret TO gt_ret.
+        CLEAR ls_ret.
+      ENDIF.
+
+    ENDLOOP.
+
+    REFRESH: lt_bp_general,
+             lt_bp_role,
+             lt_bp_ident_numbers,
+             lt_bank_details,
+             lt_tax,
+             lt_address,
+             lt_add_usage,
+             lt_add_telno,
+             lt_fax_no,
+             lt_email,
+             lt_gen,
+             lt_comp,
+             lt_with_tax,
+             lt_purchase,
+             lt_purch_func,
+             lt_ret.
+  ENDLOOP.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form read_file_v
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM read_file_v .
+  DATA lv_filename TYPE string.
+  lv_filename = p_file.
+
+  DATA : lt_excel TYPE STANDARD TABLE OF alsmex_tabline,
+         ls_excel TYPE  alsmex_tabline,
+         ls_vend  TYPE ty_vend.
+
+  CLEAR gt_vend[].
+
+*  CALL FUNCTION 'ZFM_EXCEL_UPLOAD'
+*    EXPORTING
+*      filename    = lv_filename
+*      i_begin_col = '1'
+*      i_begin_row = p_brow
+*      i_end_col   = '100'
+*      i_end_row   = p_erow
+*    TABLES
+*      data_tab    = gt_vend.
+
+CALL FUNCTION 'TEXT_CONVERT_XLS_TO_SAP'
+    EXPORTING
+*     I_FIELD_SEPERATOR    =
+*     I_LINE_HEADER        =
+      i_tab_raw_data       = it_raw
+      i_filename           = p_file
+*     I_STEP               = 1
+    TABLES
+      i_tab_converted_data = gt_vend_1
+    EXCEPTIONS
+      conversion_failed    = 1
+      OTHERS               = 2.
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+  DATA : lv_count TYPE i.
+  lv_count = 0.
+  LOOP AT gt_vend_1 INTO DATA(gs_vend).
+    lv_count = lv_count + 1.
+    IF lv_count GE p_brow.
+      append gs_vend to gt_vend.
+    ENDIF.
+    IF lv_count EQ p_erow.
+      exit.
+    ENDIF.
+  ENDLOOP.
+ENDFORM.
