@@ -1,0 +1,10 @@
+*&---------------------------------------------------------------------*
+*& Report ZBP_UPLOAD_PROGRAM_MODIFIED
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+REPORT zbp_upload_program_modified.
+
+INCLUDE zbp_upload_program_cust1_top.
+INCLUDE zbp_upload_program_cust1_form.
+INCLUDE zbp_upload_program_cust1_flow.
